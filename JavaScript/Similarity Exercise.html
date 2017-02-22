@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Similarity Exercise | Ping Lin</title>
+  <script src="https://unpkg.com/vue/dist/vue.js"></script>
+  <script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/vis/4.18.1/vis.min.js"></script>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/vis/4.18.1/vis-timeline-graph2d.min.css" rel="stylesheet" type="text/css" />
+  <meta charset="utf-8" />
+  <style type="text/css">  
+    body, html {
+      font-family: sans-serif;
+      font-family: Helvetica, Arial, sans-serif;
+	  background-color: #eee;
+    }
+    h2{
+    	font-family: sans-serif;
+    	text-align: left;
+    }
+    lable{
+    	font-family: sans-serif;
+    }
+    p{
+		margin-bottom: 25px;
+		font-size: 16px;
+		line-height: 18px;
+	}
+	.graphTitle{
+        text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+<div id="generate Dataset">
+	<h1>Please Generating Blocks First</h1>
+	<label>Number of Blocks (Integer):</label>
+	<input id="BlocksNum">
+	<label>Number Limit of Subset in each Block(Integer):</label>
+	<input id="DimensionLimit">
+	<button type="button" onclick="generate()">generating</button>
+	
+</div>
+
+<div id="show Dataset">
+	<h3>show blocks</h3>
+	<h5>only show top 20 blocks with up to 10 subnets in each blocks</h5>
+	<p id="show blocks"></p>
+</div>
+
+<div id = "Similarity Finder">
+	<h1>Now look for relation between blocks</h1>
+	<button type="button" onclick="calSimilarity()">calSimilarity</button>
+</div>
+
+
+
+<div id="show matrix">
+	<h3>show similarity</h3>
+	<p id="converting blocks"></p>
+	<p id="finding similarity"></p>
+	<p id="piechart" style="width: 900px; height: 500px;"></p>
+	<button type="button" onclick="showCombination('contain')">showContainPair</button>
+	<button type="button" onclick="showCombination('intersect')">showIntersectPair</button>
+	<button type="button" onclick="showCombination('adjacent')">showAdjacentPair</button>
+	<button type="button" onclick="showCombination('none')">showNonePair</button>
+	<p id="showCombination"></p>
+	<h2>Please choose two Blocks to see their relation</h2>
+	<label>Block1(Integer, from 0 to max block number):</label>
+	<input id="Block1">
+	<label>Block2(Integer, from 0 to max block number except block1 number):</label>
+	<input id="Block2">
+	<button type="button" onclick="showPair()">show</button>
+	<p id="block1 show"></p>
+	<p id="block2 show"></p>
+	<p id="relation show"></p>
+</div>
+
+<script>
+var aContainb_Block = 0x02;//0x01 << 1;
+var bContaina_Block = 0x04;//0x01 << 2;
+var adjacent_Block = 0x08;//0x01 << 3;
+var intersect_Block = 0x10;//0x01 << 4;
+var none_Block = 0x20;//0x01 << 5;
+
+//for subset
+var same_subset = 0x01;
+var aContainb_subset = 0x02;//0x01 << 1;
+var bContaina_subset = 0x04;//0x01 << 2;
+var adjacent_subset = 0x08;//0x01 << 3;
+var none_subset = 0x10;//0x01 << 4;
+
+var blockNumShow = 20;
+var subnetNumShow = 10;
+
+var dataset_global;
+var blocks_global;
+var matrix_global;
+
+
+function generate(){
+    var blockNum, dimensionLimit;
+    blockNum = document.getElementById("BlocksNum").value;
+    dimensionLimit = document.getElementById("DimensionLimit").value;
+    dataset_global = generateDataset(parseInt(blockNum), parseInt(dimensionLimit));
+    document.getElementById("show blocks").innerHTML = showData(dataset_global);
+}
+
+function showData(dataset){
+	var blockShow = Math.min(100, dataset.length);
+	var output = [];
+	for(var i = 0; i < dataset.length && i < blockNumShow; i++){
+		output.push("block" + i +":\t");
+		for(var j = 0; j < dataset[i].length && j < subnetNumShow; j++){
+			output.push(dataset[i][j]);
+			output.push(",\t\t")
+		}
+		output.pop();
+		output.push("<br><br>");
+	}
+	return output.join('\t');
+}
+
+function calSimilarity(){
+	var convDataStart = new Date();
+	blocks_global = convertDataset(dataset_global);
+	var genMatrixStart = new Date();
+	matrix_global = generateRelationMatrix(blocks_global); 
+	var completeMatrix = new Date();
+	document.getElementById("converting blocks").innerHTML = "proc time of coverting blocks(ms):" + (genMatrixStart.getTime() - convDataStart.getTime()).toString();
+    document.getElementById("finding similarity").innerHTML = "proc time of finding similarity between blocks(ms):" + (completeMatrix.getTime() - genMatrixStart.getTime()).toString();
+    showSimilarityPieChart(matrix_global);
+}
+
+function showSimilarityPieChart(matrix){	
+	var propotion = calProportion(matrix);
+	plotPieChart(propotion);
+}
+
+function calProportion(matrix){
+	vector = [0,0,0,0]; // contain, intersection, adjacent, none, all
+	for(var i = 0; i < matrix.length; i++){
+		for(var j = i + 1; j < matrix[i].length; j++){
+			var el = matrix[i][j];
+			if((el & (aContainb_Block | bContaina_Block)) != 0) vector[0]++;
+			if((el & intersect_Block) != 0) vector[1]++;
+			if((el & adjacent_Block) != 0) vector[2]++;
+			if((el & none_Block) != 0) vector[3]++;
+			//vector[4]++;
+		}
+	}
+	return vector;
+}
+
+function plotPieChart(vector){
+    google.charts.load('current', {'packages':['corechart']});
+    google.charts.setOnLoadCallback(drawChart);
+    function drawChart() {
+      var data = google.visualization.arrayToDataTable([
+        ['Relation', 'Numbers'],
+        ['Contain',     vector[0]],
+        ['Interset',      vector[1]],
+        ['Adjacent',  vector[2]],
+        ['None', vector[3]],
+      ]);
+
+      var options = {
+        title: 'Relation between pairs of blocks'
+      };
+
+      var chart = new google.visualization.PieChart(document.getElementById('piechart'));
+
+      chart.draw(data, options);
+    }
+}
+
+function showPair(){
+	var block1, block2;
+	block1 = document.getElementById("Block1").value;
+	block1 = parseInt(block1);
+	block2 = document.getElementById("Block2").value;
+	block2 = parseInt(block2);
+	document.getElementById('block1 show').innerHTML = "Block" + block1 + ": " +dataset_global[block1];
+	document.getElementById('block2 show').innerHTML = "Block " + block2 + ": " + dataset_global[block2];
+	printRelation(block1, block2);   
+}
+
+function printRelation(set1, set2){
+	var relation = showRelationPair(set1, set2);
+	document.getElementById('relation show').innerHTML = "Relation: " + relation;
+}
+
+function showRelationPair(i, j){
+	var blockNum = document.getElementById("BlocksNum").value;
+	if(i >= parseInt(blockNum) || j >= parseInt(blockNum) || i < 0 || j < 0 ) return "input not in range";
+	if(i == j) return "block" + i + " and block" + j + " is the same block";
+	if(i > j){
+		var tmp = j;
+		j = i; 
+		i = tmp;
+	}
+	if(matrix_global[i][j] == aContainb_Block) return "block" + i + " contains block" + j;
+	if(matrix_global[i][j] == bContaina_Block) return "block" + j + " contains block" + i;
+	if(matrix_global[i][j] == adjacent_Block) return "block" + i + " is adjacent with block" + j;
+	if(matrix_global[i][j] == intersect_Block) return "block" + i + " intersects with block" + j;
+	if(matrix_global[i][j] == none_Block) return "block" + i + " has none relation with block" + j;
+}
+
+function showRelation(type){
+	document.getElementById("BlocksNum").value = showCombination(type);
+}
+
+function showCombination(type){	
+	combiantion = [];	
+	for(var i = 0; i < matrix_global.length; i++){
+		for(var j = i + 1; j < matrix_global.length; j++){
+		 	var pair = '[' + i + "," + j + ']';
+		 	if(type == 'contain'){
+		 		if(matrix_global[i][j] == aContainb_Block || matrix_global[i][j] == bContaina_Block){
+			 		if(matrix_global[i][j] == bContaina_Block){
+						pair = '[' + j + "," + i+ ']';		
+					}
+			 		combiantion.push(pair);
+				}
+		 	}
+		 	else if(type == 'intersect'){
+		 		if(matrix_global[i][j] == intersect_Block){
+		 			combiantion.push(pair);
+			 	}
+		 	}
+		 	else if(type == 'adjacent'){
+		 		if(matrix_global[i][j] == adjacent_Block){
+		 			combiantion.push(pair);
+			 	}
+		 	}
+		 	else if(type == 'none'){
+		 		if(matrix_global[i][j] == none_Block){
+		 			combiantion.push(pair);
+			 	}
+		 	} 
+		}
+	}
+	document.getElementById("showCombination").innerHTML = combiantion;
+}
+
+function getRandomInt(min, max) {
+  min = Math.ceil(min);
+  max = Math.floor(max);
+  return Math.floor(Math.random() * (max - min)) + min;
+}
+
+function generateSubnetStr() {
+    var subnetStr = "";
+    for (var j = 0; j< 4; j++) {
+        part = getRandomInt(0,255);
+        subnetStr += part.toString();
+        if(j<3) subnetStr += '.';
+    }
+    subnetStr += '/' + getRandomInt(1,32);
+    return subnetStr;
+}
+
+
+function generateDataset(dataset_size, dimension_limit) {
+  dataset = new Array();
+  for (var i = 0; i < dataset_size; i++) {
+    group = new Array();
+    var dimension = getRandomInt(1, dimension_limit + 1);
+    for(var j = 0; j < dimension; j++){
+      subnetStr = generateSubnetStr();
+      //convertToSubnet(subnetStr);
+      group.push(subnetStr);
+    }
+    dataset.push(group);
+  }
+  return dataset;
+}
+
+function convertToMask(num){
+  var mask = 0xffffffff << (32 - num);
+  return mask;
+}
+
+function convertToSubnet(subnetStr) {
+  var segs = subnetStr.split(/\.|\//);
+  var ip = 0;
+  var offset = 24;
+  var masknum = parseInt(segs[4]);
+  var mask = convertToMask(masknum);
+  for(var i = 0; i< 4; i++){
+    ip += parseInt(segs[i]) << offset;
+	offset -= 8;
+  }
+  var begin = ip & mask;
+  subnet = {name: subnetStr, ip: ip, begin: begin, mask: mask, masknum: masknum};
+  return subnet;
+}
+
+function convertDataset(dataset) {
+  subnet_groups = new Array();
+  dataset.forEach(function(strGroup) {
+      group = new Array();
+      strGroup.forEach(function(subnetStr) {
+        subnet = convertToSubnet(subnetStr);
+        group.push(subnet)
+        });
+        subnet_groups.push(group);
+  }); 
+  
+  return subnet_groups;
+}
+
+function findRelation(a, b) {
+	if(a.begin == b.begin && a.masknum == b.masknum) return same_subset;
+	if((a.begin & b.mask) == b.begin && a.masknum > b.masknum) return bContaina_subset;//a in b 
+	if((b.begin & a.mask) == a.begin && a.masknum < b.masknum) return aContainb_subset;//b in a 
+	if(a.begin + ~a.mask + 1 == b.begin || b.begin + ~b.mask + 1 == a.begin) return adjacent_subset;
+	return none_subset;
+}
+
+function calculateRelationVector(a, b){
+  var relation = 0;
+  var bContained = [];
+  a.forEach(function(subnet_a) {
+	  var relation_each = 0;
+	  var j = 0;
+	  b.forEach(function(subnet_b) {
+		  var tmpRelation = findRelation(subnet_a, subnet_b);
+		  if((tmpRelation & ( same_subset | aContainb_subset)) != 0) bContained[j] = true;
+		  else bContained[j] = false;
+		  relation_each |= tmpRelation;
+		  j++;
+      });
+	  relation_each = covertRelation(relation_each);
+	  relation |= relation_each;
+    });    
+ 	var relationByGroup = findRelationByGroup(relation,bContained);
+	return relationByGroup;
+}
+
+function covertRelation(relation){
+	if((relation & same_subset ) != 0) return (same_subset | bContaina_subset);
+	if((relation & bContaina_subset) != 0) return bContaina_subset;
+	else if((relation & aContainb_subset)!= 0) return aContainb_subset;
+	else if((relation & adjacent_subset)!= 0) return adjacent_subset;
+	else return none_subset;
+}
+
+function generateRelationMatrix(subnet_groups){
+  var n = subnet_groups.length;
+  var result_matrix = [];
+  for(var i = 0; i < n; i++){
+	var row = [];
+    for(var j = i + 1; j < n; j++){ //i, j and j, i , they compare same subsets, only change beijing contained to contain others
+	  relationVector = calculateRelationVector(subnet_groups[i], subnet_groups[j]);
+	  row[j] = relationVector;
+    }
+    result_matrix.push(row);
+   }
+   return result_matrix;
+}
+
+function findRelationByGroup(relation, bContained){
+	if(relation == none_subset) return none_Block;
+	if(relation == adjacent_subset || relation == (adjacent_subset | none_subset)) return adjacent_Block;	
+	if(relation == bContaina_subset || relation == (bContaina_subset | same_subset)) return bContaina_Block;
+	if((relation & (aContainb_subset | same_subset)) == 0) return intersect_Block;
+	for(var i = 0; i < bContained.length; i++){
+		if(!bContained[i])return intersect_Block;
+	}	
+	return aContainb_Block;
+}
+
+</script> 
+
+</body>
+</html>
